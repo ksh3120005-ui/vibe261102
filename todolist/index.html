@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>오늘의 할일</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <div class="header-top">
+        <h1 class="title">📝 오늘의 할일</h1>
+        <button id="theme-toggle" class="icon-btn" type="button"></button>
+      </div>
+      <p class="today"><time id="today"></time></p>
+      <div id="progress" class="progress" role="progressbar" aria-label="오늘 진행률" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+      <p id="progress-text" class="progress-text"></p>
+      <p id="celebrate" class="celebrate" hidden>오늘 할일 완료! 🎉</p>
+    </header>
+
+    <p id="storage-warning" class="notice notice-warn" hidden>
+      이 브라우저에서는 저장할 수 없습니다. 페이지를 닫으면 할일이 사라집니다.
+    </p>
+    <div id="carryover" class="notice" hidden>
+      <span id="carryover-text"></span>
+      <button id="carryover-btn" class="btn-link" type="button">오늘로 가져오기</button>
+    </div>
+
+    <section class="card">
+      <form id="add-form" class="add-form" novalidate>
+        <label for="new-todo" class="sr-only">새 할일</label>
+        <input id="new-todo" class="input" type="text" maxlength="100" placeholder="할 일을 입력하세요..." autocomplete="off" autofocus>
+        <div class="add-controls">
+          <label for="new-priority" class="sr-only">우선순위</label>
+          <select id="new-priority" class="select">
+            <option value="high">높음</option>
+            <option value="medium" selected>보통</option>
+            <option value="low">낮음</option>
+          </select>
+          <button type="submit" class="btn-primary">추가</button>
+        </div>
+      </form>
+
+      <nav class="filters" aria-label="할일 필터">
+        <button type="button" class="filter" data-filter="all">전체 <span class="count" data-count="all">0</span></button>
+        <button type="button" class="filter" data-filter="active">진행 중 <span class="count" data-count="active">0</span></button>
+        <button type="button" class="filter" data-filter="done">완료 <span class="count" data-count="done">0</span></button>
+      </nav>
+
+      <ul id="todo-list" class="todo-list" aria-label="오늘의 할일 목록"></ul>
+      <p id="empty" class="empty" hidden></p>
+
+      <footer class="footer">
+        <span class="hint">더블클릭으로 수정 · 드래그 또는 Alt+↑/↓로 순서 변경</span>
+        <button id="clear-completed" class="btn-ghost" type="button">완료 항목 지우기</button>
+      </footer>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden>
+    <span id="toast-text"></span>
+    <button id="toast-undo" class="btn-link" type="button">실행 취소</button>
+  </div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
