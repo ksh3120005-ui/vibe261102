@@ -1,72 +1,79 @@
 import "server-only";
 
-import { createHash, randomUUID } from "node:crypto";
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import { createHash } from "node:crypto";
 
-import type { Category, Comment, Post, PublicPost } from "./types";
+import { neon } from "@neondatabase/serverless";
 
-// 간단한 JSON 파일 저장소. 데모용이므로 실제 서비스에서는 DB로 교체하세요.
-const DATA_DIR = path.join(process.cwd(), "data");
-const DB_FILE = path.join(DATA_DIR, "db.json");
+import type { Category, PostSummary, PublicPost } from "./types";
 
-type Db = { nextId: number; posts: Post[] };
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL 환경 변수가 설정되지 않았습니다. .env.local을 확인하세요.");
+}
+
+const sql = neon(process.env.DATABASE_URL);
 
 export function hashPassword(password: string) {
   return createHash("sha256").update(password).digest("hex");
 }
 
-function seed(): Db {
-  const now = Date.now();
-  const at = (minutesAgo: number) =>
-    new Date(now - minutesAgo * 60_000).toISOString();
-  const samples: Array<[Category, string, string, string]> = [
-    ["공지", "게시판 이용 안내", "관리자", "DemoWeb 게시판에 오신 것을 환영합니다.\n\n글 작성 시 입력한 비밀번호로 수정·삭제할 수 있습니다. 서로 존중하는 커뮤니티를 만들어 주세요."],
-    ["자유", "첫 번째 글입니다", "홍길동", "Next.js와 shadcn/ui로 만든 게시판이에요. 반갑습니다!"],
-    ["질문", "Server Actions는 언제 쓰나요?", "김개발", "폼 제출 같은 데이터 변경 작업에 API 라우트 대신 써도 괜찮을까요?"],
-    ["정보", "TypeScript 유틸리티 타입 정리", "이타입", "Partial, Pick, Omit, Record 등 자주 쓰는 유틸리티 타입을 정리했습니다."],
-  ];
-  const posts: Post[] = samples.map(([category, title, author, content], i) => ({
-    id: i + 1,
-    category,
-    title,
-    content,
-    author,
-    passwordHash: hashPassword("1234"),
-    views: (samples.length - i) * 7,
-    createdAt: at((samples.length - i) * 90),
-    updatedAt: at((samples.length - i) * 90),
-    comments: [],
-  }));
-  posts[2].comments.push({
-    id: randomUUID(),
-    author: "박리액트",
-    content: "네, 폼 처리에는 Server Actions가 편리합니다.",
-    createdAt: at(30),
+// 서버 프로세스당 한 번만 테이블 생성 + 샘플 데이터 삽입
+let ready: Promise<void> | undefined;
+
+function ensureSchema() {
+  ready ??= (async () => {
+    await sql`
+      CREATE TABLE IF NOT EXISTS posts (
+        id            SERIAL PRIMARY KEY,
+        category      TEXT NOT NULL,
+        title         TEXT NOT NULL,
+        content       TEXT NOT NULL,
+        author        TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        views         INTEGER NOT NULL DEFAULT 0,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`;
+    await sql`
+      CREATE TABLE IF NOT EXISTS comments (
+        id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        post_id    INTEGER NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+        author     TEXT NOT NULL,
+        content    TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`;
+    await sql`CREATE INDEX IF NOT EXISTS comments_post_id_idx ON comments(post_id)`;
+
+    const [{ count }] = await sql`SELECT count(*)::int AS count FROM posts`;
+    if (count === 0) await seed();
+  })().catch((err) => {
+    ready = undefined; // 다음 요청에서 다시 시도
+    throw err;
   });
-  return { nextId: posts.length + 1, posts };
+  return ready;
 }
 
-async function readDb(): Promise<Db> {
-  try {
-    return JSON.parse(await fs.readFile(DB_FILE, "utf8")) as Db;
-  } catch {
-    const db = seed();
-    await writeDb(db);
-    return db;
+async function seed() {
+  const samples: Array<[Category, string, string, string, number]> = [
+    ["공지", "게시판 이용 안내", "관리자", "DemoWeb 게시판에 오신 것을 환영합니다.\n\n글 작성 시 입력한 비밀번호로 수정·삭제할 수 있습니다. 서로 존중하는 커뮤니티를 만들어 주세요.", 28],
+    ["자유", "첫 번째 글입니다", "홍길동", "Next.js와 shadcn/ui로 만든 게시판이에요. 반갑습니다!", 21],
+    ["질문", "Server Actions는 언제 쓰나요?", "김개발", "폼 제출 같은 데이터 변경 작업에 API 라우트 대신 써도 괜찮을까요?", 14],
+    ["정보", "TypeScript 유틸리티 타입 정리", "이타입", "Partial, Pick, Omit, Record 등 자주 쓰는 유틸리티 타입을 정리했습니다.", 7],
+  ];
+  const hash = hashPassword("1234");
+  for (const [category, title, author, content, views] of samples) {
+    const [{ id }] = await sql`
+      INSERT INTO posts (category, title, content, author, password_hash, views)
+      VALUES (${category}, ${title}, ${content}, ${author}, ${hash}, ${views})
+      RETURNING id`;
+    if (category === "질문") {
+      await sql`
+        INSERT INTO comments (post_id, author, content)
+        VALUES (${id}, '박리액트', '네, 폼 처리에는 Server Actions가 편리합니다.')`;
+    }
   }
 }
 
-async function writeDb(db: Db) {
-  await fs.mkdir(DATA_DIR, { recursive: true });
-  await fs.writeFile(DB_FILE, JSON.stringify(db, null, 2), "utf8");
-}
-
-function toPublic(post: Post): PublicPost {
-  const { passwordHash, ...rest } = post;
-  void passwordHash;
-  return rest;
-}
+const iso = (value: unknown) => new Date(value as string | Date).toISOString();
 
 export async function listPosts(opts: {
   q?: string;
@@ -74,44 +81,76 @@ export async function listPosts(opts: {
   page: number;
   pageSize: number;
 }) {
-  const { posts } = await readDb();
-  const q = opts.q?.trim().toLowerCase();
-  const filtered = posts
-    .filter((p) => !opts.category || p.category === opts.category)
-    .filter(
-      (p) =>
-        !q ||
-        p.title.toLowerCase().includes(q) ||
-        p.content.toLowerCase().includes(q) ||
-        p.author.toLowerCase().includes(q),
-    )
-    .sort((a, b) => {
-      // 공지는 항상 위로
-      if (a.category === "공지" && b.category !== "공지") return -1;
-      if (b.category === "공지" && a.category !== "공지") return 1;
-      return b.id - a.id;
-    });
-  const totalPages = Math.max(1, Math.ceil(filtered.length / opts.pageSize));
+  await ensureSchema();
+  const category = opts.category ?? "";
+  const q = opts.q?.trim() ?? "";
+  const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+
+  const [{ total }] = await sql`
+    SELECT count(*)::int AS total FROM posts
+    WHERE (${category} = '' OR category = ${category})
+      AND (${q} = '' OR title ILIKE ${like} OR content ILIKE ${like} OR author ILIKE ${like})`;
+
+  const totalPages = Math.max(1, Math.ceil(total / opts.pageSize));
   const page = Math.min(Math.max(1, opts.page), totalPages);
-  const items = filtered
-    .slice((page - 1) * opts.pageSize, page * opts.pageSize)
-    .map(toPublic);
-  return { items, total: filtered.length, page, totalPages };
+
+  const rows = await sql`
+    SELECT p.id, p.category, p.title, p.author, p.views, p.created_at, p.updated_at,
+           (SELECT count(*)::int FROM comments c WHERE c.post_id = p.id) AS comment_count
+    FROM posts p
+    WHERE (${category} = '' OR p.category = ${category})
+      AND (${q} = '' OR p.title ILIKE ${like} OR p.content ILIKE ${like} OR p.author ILIKE ${like})
+    ORDER BY (p.category = '공지') DESC, p.id DESC
+    LIMIT ${opts.pageSize} OFFSET ${(page - 1) * opts.pageSize}`;
+
+  const items: PostSummary[] = rows.map((r) => ({
+    id: r.id,
+    category: r.category,
+    title: r.title,
+    author: r.author,
+    views: r.views,
+    createdAt: iso(r.created_at),
+    updatedAt: iso(r.updated_at),
+    commentCount: r.comment_count,
+  }));
+  return { items, total, page, totalPages };
 }
 
-export async function getPost(id: number) {
-  const { posts } = await readDb();
-  const post = posts.find((p) => p.id === id);
-  return post ? toPublic(post) : null;
-}
-
-export async function incrementViews(id: number) {
-  const db = await readDb();
-  const post = db.posts.find((p) => p.id === id);
+async function loadPost(id: number, incrementViews: boolean) {
+  await ensureSchema();
+  if (!Number.isInteger(id)) return null;
+  const [post] = incrementViews
+    ? await sql`UPDATE posts SET views = views + 1 WHERE id = ${id} RETURNING *`
+    : await sql`SELECT * FROM posts WHERE id = ${id}`;
   if (!post) return null;
-  post.views += 1;
-  await writeDb(db);
-  return toPublic(post);
+  const comments = await sql`
+    SELECT id, author, content, created_at FROM comments
+    WHERE post_id = ${id} ORDER BY created_at`;
+  const result: PublicPost = {
+    id: post.id,
+    category: post.category,
+    title: post.title,
+    content: post.content,
+    author: post.author,
+    views: post.views,
+    createdAt: iso(post.created_at),
+    updatedAt: iso(post.updated_at),
+    comments: comments.map((c) => ({
+      id: c.id,
+      author: c.author,
+      content: c.content,
+      createdAt: iso(c.created_at),
+    })),
+  };
+  return result;
+}
+
+export function getPost(id: number) {
+  return loadPost(id, false);
+}
+
+export function incrementViews(id: number) {
+  return loadPost(id, true);
 }
 
 export async function createPost(input: {
@@ -121,23 +160,19 @@ export async function createPost(input: {
   author: string;
   password: string;
 }) {
-  const db = await readDb();
-  const now = new Date().toISOString();
-  const post: Post = {
-    id: db.nextId++,
-    category: input.category,
-    title: input.title,
-    content: input.content,
-    author: input.author,
-    passwordHash: hashPassword(input.password),
-    views: 0,
-    createdAt: now,
-    updatedAt: now,
-    comments: [],
-  };
-  db.posts.push(post);
-  await writeDb(db);
-  return post.id;
+  await ensureSchema();
+  const [{ id }] = await sql`
+    INSERT INTO posts (category, title, content, author, password_hash)
+    VALUES (${input.category}, ${input.title}, ${input.content}, ${input.author},
+            ${hashPassword(input.password)})
+    RETURNING id`;
+  return id as number;
+}
+
+async function checkPassword(id: number, password: string) {
+  const [row] = await sql`SELECT password_hash FROM posts WHERE id = ${id}`;
+  if (!row) return null;
+  return row.password_hash === hashPassword(password);
 }
 
 /** 비밀번호가 맞으면 true, 틀리면 false, 글이 없으면 null */
@@ -146,23 +181,23 @@ export async function updatePost(
   password: string,
   input: { category: Category; title: string; content: string },
 ) {
-  const db = await readDb();
-  const post = db.posts.find((p) => p.id === id);
-  if (!post) return null;
-  if (post.passwordHash !== hashPassword(password)) return false;
-  Object.assign(post, input, { updatedAt: new Date().toISOString() });
-  await writeDb(db);
+  await ensureSchema();
+  const ok = await checkPassword(id, password);
+  if (!ok) return ok;
+  await sql`
+    UPDATE posts
+    SET category = ${input.category}, title = ${input.title},
+        content = ${input.content}, updated_at = now()
+    WHERE id = ${id}`;
   return true;
 }
 
 /** 비밀번호가 맞으면 true, 틀리면 false, 글이 없으면 null */
 export async function deletePost(id: number, password: string) {
-  const db = await readDb();
-  const index = db.posts.findIndex((p) => p.id === id);
-  if (index === -1) return null;
-  if (db.posts[index].passwordHash !== hashPassword(password)) return false;
-  db.posts.splice(index, 1);
-  await writeDb(db);
+  await ensureSchema();
+  const ok = await checkPassword(id, password);
+  if (!ok) return ok;
+  await sql`DELETE FROM posts WHERE id = ${id}`;
   return true;
 }
 
@@ -170,16 +205,10 @@ export async function addComment(
   postId: number,
   input: { author: string; content: string },
 ) {
-  const db = await readDb();
-  const post = db.posts.find((p) => p.id === postId);
-  if (!post) return false;
-  const comment: Comment = {
-    id: randomUUID(),
-    author: input.author,
-    content: input.content,
-    createdAt: new Date().toISOString(),
-  };
-  post.comments.push(comment);
-  await writeDb(db);
-  return true;
+  await ensureSchema();
+  const rows = await sql`
+    INSERT INTO comments (post_id, author, content)
+    SELECT id, ${input.author}, ${input.content} FROM posts WHERE id = ${postId}
+    RETURNING id`;
+  return rows.length > 0;
 }

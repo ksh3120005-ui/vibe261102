@@ -23,6 +23,10 @@ export type Post = {
 
 export type PublicPost = Omit<Post, "passwordHash">;
 
+export type PostSummary = Omit<PublicPost, "content" | "comments"> & {
+  commentCount: number;
+};
+
 export type FormState = {
   error?: string;
 };
