@@ -1,0 +1,27 @@
+# exe 파일 속성(자세히 탭)에 표시되는 버전 정보
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('041204B0', [
+        StringStruct('CompanyName', 'ksh3120005'),
+        StringStruct('FileDescription', 'KOSPI200 · 거래대금 상위 크롤러'),
+        StringStruct('FileVersion', '1.0.0'),
+        StringStruct('InternalName', 'Kospi200Crawler'),
+        StringStruct('OriginalFilename', 'Kospi200Crawler.exe'),
+        StringStruct('ProductName', 'KOSPI200 Crawler'),
+        StringStruct('ProductVersion', '1.0.0')
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [0x0412, 1200])])
+  ]
+)

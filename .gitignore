@@ -1,0 +1,2 @@
+# PyInstaller 빌드 결과물 (exe) - 저장소의 모든 폴더에 있는 dist 폴더를 업로드하지 않음
+dist/
